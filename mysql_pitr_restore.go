@@ -170,13 +170,48 @@ func restore_full_backup_tar(backup_tar string, datadir string) {
 	run_fatal("can't start mysqld", "", "systemctl", "start", "mysql")
 }
 
+type BackupS3 struct {
+	Region          string
+	Endpoint        string
+	AccessKey       string
+	SecretKey       string
+	Bucket          string
+	BucketLookup    string
+	BackupDirectory string
+}
+
+func restore_full_backup_s3(conn BackupS3, datadir string) {
+	run_fatal("can't stop mysqld", "", "systemctl", "stop", "mysql")
+	run_fatal("cleanup data directory", "", "rm", "-rf", datadir)
+	run_fatal("create data directory", "", "mkdir", datadir)
+	restore_cmd := fmt.Sprintf("xbcloud get --storage=s3 --s3-region=%s --s3-endpoint=%s --s3-access-key=%s --s3-secret-key=%s --s3-bucket=%s --s3-bucket-lookup=%s %s | xbstream -x -C %s --parallel=8",
+		shellescape.Quote(conn.Region),
+		shellescape.Quote(conn.Endpoint),
+		shellescape.Quote(conn.AccessKey),
+		shellescape.Quote(conn.SecretKey),
+		shellescape.Quote(conn.Bucket),
+		shellescape.Quote(conn.BucketLookup),
+		shellescape.Quote(conn.BackupDirectory),
+		shellescape.Quote(datadir))
+	run_fatal("", "", "sh", "-c", restore_cmd)
+	run_fatal("Can't prepare backup", "", "xtrabackup", "--prepare", "--target-dir", datadir)
+	run_fatal("can't change ownship", "", "chown", "mysql", "-R", datadir)
+	run_fatal("can't start mysqld", "", "systemctl", "start", "mysql")
+}
+
 var backup_tar = flag.String("backup-tar", "", "Remove data directory and unpack tar.gz or tar.* archive with MySQL data files")
 var binlog_dir = flag.String("binlog-directory", "", "Binary logs directory location")
+var storage_type = flag.String("storage", "", "Storage type, e.g. s3")
+var s3_region = flag.String("s3-region", "us-east-1", "s3 region")
+var s3_endpoint = flag.String("s3-endpoint", "", "s3 endpoint for https connection in domain:port format")
+var s3_access_key = flag.String("s3-access-key", "", "s3 access key")
+var s3_secret_key = flag.String("s3-secret-key", "", "s3 secret key")
+var s3_bucket = flag.String("s3-bucket", "", "s3 bucket")
+var s3_bucket_lookup = flag.String("s3-bucket-lookup", "path", "s3 bucket lookup e.g. path")
+var s3_backup_dir = flag.String("s3-backup-directory", "", "backup path in S3 bucket")
 
 func main() {
 	flag.Parse()
-
-	println(*backup_tar)
 
 	datadir, relay_log_index := get_mysql_vars()
 
@@ -186,6 +221,8 @@ func main() {
 
 	if *backup_tar != "" {
 		restore_full_backup_tar(*backup_tar, datadir)
+	} else if *storage_type == "s3" {
+		restore_full_backup_s3(BackupS3{*s3_region, *s3_endpoint, *s3_access_key, *s3_secret_key, *s3_bucket, *s3_bucket_lookup, *s3_backup_dir}, datadir)
 	} else {
 		log.Print("Using existing database")
 	}
