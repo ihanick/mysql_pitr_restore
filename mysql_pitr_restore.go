@@ -9,9 +9,9 @@ import (
 	"os"
 	"os/exec"
 	"path"
-	"path/filepath"
 	"regexp"
 	"sort"
+	"strings"
 	"time"
 
 	"github.com/alessio/shellescape"
@@ -47,7 +47,7 @@ func copy_binlogs(src_dir string, datadir string, idx_file string, first_binlog 
 		log.Fatal(err)
 	}
 
-	index_file, err := os.Create(path.Join(datadir, idx_file))
+	index_file, err := os.OpenFile(path.Join(datadir, idx_file), os.O_RDWR|os.O_CREATE|os.O_TRUNC, 0755)
 	if err != nil {
 		log.Fatal(err)
 	}
@@ -55,15 +55,18 @@ func copy_binlogs(src_dir string, datadir string, idx_file string, first_binlog 
 
 	var file_names []string
 	binlog_cnt := 0
-	binlog_re, _ := regexp.Compile(`\.[0-9]{6}`)
+	binlog_re, _ := regexp.Compile(`\.[0-9]{6}|binlog_1`)
 	for _, v := range files {
 		if !v.IsDir() {
+			if strings.HasSuffix(string(v.Name()), "-gtid-set") {
+				continue
+			}
 			if matched := binlog_re.MatchString(string(v.Name())); !matched {
 				continue
 			}
 
 			binlog_cnt++
-			dstName := relay_log_name + filepath.Ext(v.Name())
+			dstName := relay_log_name + fmt.Sprintf(".%06d", binlog_cnt)
 			copy_file(path.Join(src_dir, v.Name()), path.Join(datadir, dstName))
 			file_names = append(file_names, dstName)
 		}
@@ -194,5 +197,5 @@ func main() {
 	first_binlog := ""
 	copy_binlogs(*binlog_dir, datadir, relay_log_index, &first_binlog)
 	run_fatal("can't change ownship", "", "chown", "mysql", "-R", datadir)
-	run_fatal("can't setup replication", "", "mysql", "-e", "CHANGE MASTER TO RELAY_LOG_FILE='"+first_binlog+"', RELAY_LOG_POS=1, MASTER_HOST='dummy' FOR CHANNEL '';START SLAVE SQL_THREAD FOR CHANNEL ''")
+	run_fatal("can't setup replication", "", "mysql", "-e", "SET GLOBAL server_id=UNIX_TIMESTAMP();CHANGE MASTER TO RELAY_LOG_FILE='"+first_binlog+"', RELAY_LOG_POS=1, MASTER_HOST='dummy' FOR CHANNEL '';START SLAVE SQL_THREAD FOR CHANNEL ''")
 }
