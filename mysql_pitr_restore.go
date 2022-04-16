@@ -15,6 +15,8 @@ import (
 	"time"
 
 	"github.com/alessio/shellescape"
+	"github.com/minio/minio-go/v7"
+	"github.com/minio/minio-go/v7/pkg/credentials"
 )
 
 var TIMEOUT time.Duration = 600
@@ -199,6 +201,35 @@ func restore_full_backup_s3(conn BackupS3, datadir string) {
 	run_fatal("can't start mysqld", "", "systemctl", "start", "mysql")
 }
 
+func download_binlog_from_s3(conn BackupS3, binlog_dir string) {
+	run_fatal("can't remove binlog directory", "", "rm", "-rf", binlog_dir)
+	run_fatal("create binlog directory", "", "mkdir", binlog_dir)
+	s3Client, err := minio.New(conn.Endpoint, &minio.Options{
+		Creds:  credentials.NewStaticV4(conn.AccessKey, conn.SecretKey, ""),
+		Secure: true,
+	})
+	if err != nil {
+		log.Fatal(err)
+	}
+
+	opts := minio.ListObjectsOptions{
+		Recursive: true,
+		Prefix:    "binlog_",
+	}
+
+	// List all objects from a bucket-name with a matching prefix.
+	for object := range s3Client.ListObjects(context.Background(), conn.Bucket, opts) {
+		if object.Err != nil {
+			log.Fatal(object.Err)
+		}
+		fmt.Println(object.Key)
+		err = s3Client.FGetObject(context.Background(), conn.Bucket, object.Key, path.Join(binlog_dir, object.Key), minio.GetObjectOptions{})
+		if err != nil {
+			log.Fatal(err)
+		}
+	}
+}
+
 var backup_tar = flag.String("backup-tar", "", "Remove data directory and unpack tar.gz or tar.* archive with MySQL data files")
 var binlog_dir = flag.String("binlog-directory", "", "Binary logs directory location")
 var storage_type = flag.String("storage", "", "Storage type, e.g. s3")
@@ -209,11 +240,21 @@ var s3_secret_key = flag.String("s3-secret-key", "", "s3 secret key")
 var s3_bucket = flag.String("s3-bucket", "", "s3 bucket")
 var s3_bucket_lookup = flag.String("s3-bucket-lookup", "path", "s3 bucket lookup e.g. path")
 var s3_backup_dir = flag.String("s3-backup-directory", "", "backup path in S3 bucket")
+var binlog_s3_endpoint = flag.String("binlog-s3-endpoint", "", "Binary logs endpoint")
+var binlog_s3_access_key = flag.String("binlog-s3-access-key", "", "binlog s3 access key")
+var binlog_s3_secret_key = flag.String("binlog-s3-secret-key", "", "binlog s3 secret key")
+var binlog_s3_bucket = flag.String("binlog-s3-bucket", "", "binlog bucket")
+var binlog_s3_backup_dir = flag.String("binlog-s3-backup-directory", "", "binlog backup path in S3 bucket")
+var binlog_s3_bucket_lookup = flag.String("binlog-s3-bucket-lookup", "path", "binlog s3 bucket lookup e.g. path")
 
 func main() {
 	flag.Parse()
 
 	datadir, relay_log_index := get_mysql_vars()
+
+	if *binlog_s3_endpoint != "" && *binlog_dir != "" {
+		download_binlog_from_s3(BackupS3{*s3_region, *binlog_s3_endpoint, *binlog_s3_access_key, *binlog_s3_secret_key, *binlog_s3_bucket, *binlog_s3_bucket_lookup, *binlog_s3_backup_dir}, *binlog_dir)
+	}
 
 	if *binlog_dir == "" {
 		log.Fatal("PiTR binary logs directory is not defined, use --binlog-directory <location>")

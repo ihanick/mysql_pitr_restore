@@ -58,20 +58,17 @@ Use xbcloud and xbstream to download backup. Please install appropriate xtraback
 ### Getting binary logs created by Percona Kubernetes Operator for PXC
 
 ```
-#!/bin/bash -e
-ACCESS_KEY_ID=REPLACE-WITH-AWS-ACCESS-KEY
-SECRET_ACCESS_KEY=REPLACE-WITH-AWS-SECRET-KEY
-BACKUP_NAME=cluster1-2022-04-15-00:18:49-full
-
-rm -rf /root/binlogs
-mkdir /root/binlogs
-cd /root/binlogs
-curl -s -L --output /tmp/mc https://dl.min.io/client/mc/release/linux-amd64/mc
-curl -s -L --output /tmp/jq https://github.com/stedolan/jq/releases/download/jq-1.6/jq-linux64
-chmod +x /tmp/mc /tmp/jq
-export MC_HOST_srv=https://$ACCESS_KEY_ID:$SECRET_ACCESS_KEY@minio-service.default.svc.cluster.local:9000
-export HOME=/tmp
-for f in $( (echo [;/tmp/mc --json ls srv/operator-testing/|sed 's/\}/\},/g'; echo '{}]' )| /tmp/jq -r '.[] | .key'|grep binlog_1 ) ; do
-  /tmp/mc cp srv/operator-testing/$f /root/binlogs/ ;
-done
+./mysql_pitr_restore \
+  --binlog-directory=/root/binlogs1 \
+  --storage=s3 --s3-region=us-east-1 \
+  --s3-endpoint=minio-service.default.svc.cluster.local:9000 \
+  --s3-access-key=REPLACE-WITH-AWS-ACCESS-KEY \
+  --s3-secret-key=REPLACE-WITH-AWS-SECRET-KEY \
+  --s3-bucket=operator-testing \
+  --s3-bucket-lookup=path \
+  --s3-backup-directory=cluster1-2022-04-15-00:18:49-full \
+  --binlog-s3-endpoint=minio-service.default.svc.cluster.local:9000 \
+  --binlog-s3-bucket=operator-testing \
+  --binlog-s3-access-key=REPLACE-WITH-AWS-ACCESS-KEY \
+  --binlog-s3-secret-key=REPLACE-WITH-AWS-SECRET-KEY
 ```
